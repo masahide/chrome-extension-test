@@ -6,17 +6,25 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"runtime"
-
-	"golang.org/x/sys/windows/registry"
 )
 
 const (
 	extensionID = "hkmknjbjeeljdgpfkakimhcdfaghlofc"
 	Name        = "com.my_company.my_application"
+	LogFilename = "testlog.txt"
+)
+
+var (
+	manifest = Manifest{
+		Name:           Name,
+		Description:    "Example Native Messaging Host",
+		Path:           exePath,
+		Type:           "stdio",
+		AllowedOrigins: []string{"chrome-extension://" + extensionID + "/"},
+	}
 )
 
 type Message struct {
@@ -41,16 +49,31 @@ func getNativeByteOrder() binary.ByteOrder {
 }
 
 func init() {
-	nativeByteOder = getNativeByteOrder()
+	var err error
+	nativeByteOrder = getNativeByteOrder()
+	exePath, err = os.Executable()
+	if err != nil {
+		log.Fatalf("Error getting executable path: %v", err)
+	}
+	fname := filepath.Join(filepath.Dir(exePath), LogFilename)
+	f, err := os.OpenFile(fname, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error opening file: %v", err)
+		os.Exit(1)
+	}
+	w := io.MultiWriter(f, os.Stderr)
+	// log to file
+	log.SetOutput(w)
+
 }
 
 func readMessage() (Message, error) {
 	var length int32
 
-	err := binary.Read(os.Stdin, nativeByteOder, &length)
+	err := binary.Read(os.Stdin, nativeByteOrder, &length)
 	if err != nil {
 		if err == io.EOF {
-			runtime.Goexit()
+			return Message{}, err
 		}
 		return Message{}, fmt.Errorf("failed to read length: %w", err)
 	}
@@ -60,7 +83,7 @@ func readMessage() (Message, error) {
 	if err != nil {
 		return Message{}, fmt.Errorf("failed to read message: %w", err)
 	}
-	logPrintf(fmt.Sprintf("read length: %v messsage:%s\n", length, messageBytes))
+	log.Printf("read length: %v messsage:%s", length, messageBytes)
 
 	var message Message
 	err = json.Unmarshal(messageBytes, &message)
@@ -79,7 +102,7 @@ func sendMessage(message Message) error {
 
 	stdout := bufio.NewWriter(os.Stdout)
 	length := int32(len(messageBytes))
-	err = binary.Write(stdout, nativeByteOder, length)
+	err = binary.Write(stdout, nativeByteOrder, length)
 	if err != nil {
 		return fmt.Errorf("failed to write length: %w", err)
 	}
@@ -88,95 +111,22 @@ func sendMessage(message Message) error {
 	if err != nil {
 		return fmt.Errorf("failed to write message: %w", err)
 	}
-	logPrintf("write length: %v messsage:%s\n", length, messageBytes)
+	log.Printf("write length: %v messsage:%s", length, messageBytes)
 	if n != int(length) {
 		return io.ErrShortWrite
 	}
 	if err := stdout.Flush(); err != nil {
-		logPrintf("failed to flush buffer: %s", err)
-		return fmt.Errorf("failed to flush buffer: %w", err)
+		log.Fatalf("failed to flush buffer: %s", err)
 	}
-	logPrintf("sent message: %s\n", string(messageBytes))
+	log.Printf("sent message: %s", string(messageBytes))
 
 	return nil
 }
 
 var (
-	exePath        string
-	nativeByteOder binary.ByteOrder
-	fname          string
+	exePath         string
+	nativeByteOrder binary.ByteOrder
 )
-
-func init() {
-	var err error
-	exePath, err = os.Executable()
-	if err != nil {
-		errPrintf("Error getting executable path: %v\n", err)
-		return
-	}
-	fname = filepath.Join(filepath.Dir(exePath), "test.txt")
-}
-
-func register() {
-
-	manifest := Manifest{
-		Name:           Name,
-		Description:    "Example Native Messaging Host",
-		Path:           exePath,
-		Type:           "stdio",
-		AllowedOrigins: []string{"chrome-extension://" + extensionID + "/"},
-	}
-
-	manifestBytes, err := json.MarshalIndent(manifest, "", "  ")
-	if err != nil {
-		errPrintf("Error marshaling manifest: %v\n", err)
-		return
-	}
-
-	manifestPath := filepath.Join(filepath.Dir(exePath), "manifest.json")
-
-	err = os.WriteFile(manifestPath, manifestBytes, 0644)
-	if err != nil {
-		errPrintf("Error writing manifest file: %v\n", err)
-		return
-	}
-
-	keyPath := `SOFTWARE\Google\Chrome\NativeMessagingHosts\` + Name
-	key, _, err := registry.CreateKey(registry.CURRENT_USER, keyPath, registry.SET_VALUE)
-	if err != nil {
-		errPrintf("Error creating registry key: %v\n", err)
-		return
-	}
-	defer key.Close()
-
-	err = key.SetStringValue("", manifestPath)
-	if err != nil {
-		errPrintf("Error setting registry value: %v\n", err)
-		return
-	}
-
-	fmt.Println("Native Messaging Host registered successfully.")
-}
-
-func errPrintf(format string, a ...any) {
-	logPrintf(format, a...)
-	fmt.Fprintf(os.Stderr, format, a...)
-}
-
-func logPrintf(format string, a ...any) {
-	s := fmt.Sprintf(format, a...)
-	f, err := os.OpenFile(fname, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "error opening file: %v\n", err)
-		runtime.Goexit()
-	}
-	defer f.Close()
-	_, err = f.Write([]byte(s))
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error writing to file: %v\n", err)
-		runtime.Goexit()
-	}
-}
 
 func main() {
 	if len(os.Args) > 1 && os.Args[1] == "register" {
@@ -187,20 +137,33 @@ func main() {
 	for {
 		message, err := readMessage()
 		if err != nil {
-			errPrintf("Error reading message: %v\n", err)
+			if err == io.EOF {
+				return
+			}
+			log.Fatalf("Error reading message: %v", err)
 			return
 		}
-		logPrintf("Received message: %v\n", message)
-		// Open the URL in Firefox
-		cmd := exec.Command("cmd", "/C", "start", "brave", message.URL)
-		err = cmd.Start()
-		if err != nil {
-			errPrintf("Error starting browser: %v\n", err)
-			return
-		}
+		log.Printf("Received message: %v", message)
+		// Open the URL in the browser
+		openURLInBrowser(message.URL)
 		if err := sendMessage(Message{URL: "Browser opened successfully."}); err != nil {
-			errPrintf("Error sending message: %v\n", err)
+			log.Fatalf("Error sending message: %v", err)
 			return
 		}
 	}
+}
+
+func createManifest() (string, error) {
+	manifestBytes, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("error marshaling manifest: %w", err)
+	}
+
+	manifestPath := filepath.Join(filepath.Dir(exePath), "manifest.json")
+
+	err = os.WriteFile(manifestPath, manifestBytes, 0644)
+	if err != nil {
+		return "", fmt.Errorf("error writing manifest file: %w", err)
+	}
+	return manifestPath, nil
 }
