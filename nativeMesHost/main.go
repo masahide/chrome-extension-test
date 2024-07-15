@@ -20,7 +20,7 @@ const (
 var (
 	manifest = Manifest{
 		Name:           Name,
-		Description:    "Example Native Messaging Host",
+		Description:    "OpenAltBrowser allows you to effortlessly open the current tab in another browser. Enhance your browsing experience by seamlessly switching between browsers with just a click. Perfect for developers, testers, and anyone who uses multiple web browsers",
 		Path:           exePath,
 		Type:           "stdio",
 		AllowedOrigins: []string{"chrome-extension://" + extensionID + "/"},
@@ -28,7 +28,9 @@ var (
 )
 
 type Message struct {
-	URL string `json:"url"`
+	Browser string `json:"browser"`
+	Profile string `json:"profile"`
+	URL     string `json:"url"`
 }
 
 type Manifest struct {
@@ -145,7 +147,7 @@ func main() {
 		}
 		log.Printf("Received message: %v", message)
 		// Open the URL in the browser
-		openURLInBrowser(message.URL)
+		openURLInBrowser(message.Browser, message.Profile, message.URL)
 		if err := sendMessage(Message{URL: "Browser opened successfully."}); err != nil {
 			log.Fatalf("Error sending message: %v", err)
 			return
