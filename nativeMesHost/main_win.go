@@ -31,7 +31,7 @@ func register() {
 }
 
 func openURLInBrowser(browser, profile, url string) {
-	log.Printf("cmd:%s,%s,%s,%s,%s,%s", "cmd", "/C", "start", browser, url, "--profile-directory="+profile)
+	log.Printf("cmd /C start %s %s %s", browser, url, "--profile-directory="+profile)
 	cmd := exec.Command("cmd", "/C", "start", browser, url, "--profile-directory="+profile)
 	if err := cmd.Start(); err != nil {
 		log.Printf("Error starting browser: %v", err)
