@@ -10,6 +10,12 @@ import (
 	"path/filepath"
 )
 
+var browserOSAppNameMap = map[string]string{
+	"msedge":  "edge",
+	"brave":   "Brave Browser",
+	"firefox": "firefox",
+}
+
 func register() {
 	manifestPath, err := createManifest()
 	if err != nil {
@@ -29,7 +35,15 @@ func register() {
 }
 
 func openURLInBrowser(browser, profile, url string) {
-	cmd := exec.Command("open", url)
+	// Open the URL in the specified browser
+	appName, ok := browserOSAppNameMap[browser]
+	if !ok {
+		log.Printf("Unsupported browser: %s", browser)
+		return
+	}
+
+	// Open the URL in the specified browser
+	cmd := exec.Command("open", "-a", appName, "--args", "--profile-directory="+profile, url)
 	if err := cmd.Start(); err != nil {
 		log.Printf("Error starting browser: %v", err)
 	}
